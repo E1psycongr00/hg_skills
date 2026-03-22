@@ -204,9 +204,9 @@ config 이름은 기본적으로 `with_skill`과 `without_skill`를 사용한다
 
 - 각 run은 자기 전용 작업 디렉터리에서 실행하세요. 보통 `<workspace>/iteration-<N>/eval-<ID>/<config>/run-<RUN>/` 자체를 작업 디렉터리로 써도 된다.
 - 각 run 디렉터리에는 실행 전 `run_prompt.md`를 저장하세요. 이 파일이 그 run의 정확한 입력 증거다.
-- `with_skill` 실행에는 benchmark 대상 스킬이 현재 run의 작업 디렉터리 안 `.agents/skills/` 아래에서 보이도록 준비하세요. 가장 단순한 방법은 benchmark 대상 스킬 디렉터리를 복사해 두는 것이다.
+- `with_skill` 실행에는 benchmark 대상 스킬이 현재 run의 작업 디렉터리 안 `.agents/skills/` 아래에서 보이도록 준비하세요. 가장 단순한 방법은 benchmark 대상 스킬 디렉터리를 복사해 두는 것이다. 다만 benchmark fixture 누수를 막기 위해 `evals/` 디렉터리는 복사하지 마세요.
 - baseline(`without_skill`)에는 benchmark 대상 스킬을 `.agents/skills/`에 두지 마세요. 프롬프트에도 benchmark 대상 스킬의 이름, description, path, 참조 파일 경로를 직접 넣지 않는 편이 좋다.
-- 기존 스킬 개선의 `old_skill` baseline은 예외다. 이 경우에는 **스냅샷된 이전 스킬 path만** `.agents/skills/` 아래에 두고, 현재 편집 중인 스킬 path는 넘기지 않는다.
+- 기존 스킬 개선의 `old_skill` baseline은 예외다. 이 경우에는 **스냅샷된 이전 스킬 path만** `.agents/skills/` 아래에 두고, 현재 편집 중인 스킬 path는 넘기지 않는다. 이 스냅샷도 동일하게 `evals/` 디렉터리는 제외하세요.
 
 **With-skill 실행 템플릿**
 
@@ -216,17 +216,17 @@ config 이름은 기본적으로 `with_skill`과 `without_skill`를 사용한다
 - `outputs/` — 최종 결과물을 저장할 디렉터리
 - 선택 사항: `run_provenance.json` — 실행 메타데이터 기록 파일
 
-`run_prompt.md`는 대략 이런 형태면 된다.
+`run_prompt.md`는 대략 이런 형태면 된다. 가능하면 현재 run 디렉터리 기준 상대경로를 쓰고, 불필요한 절대경로나 스킬 경로는 prompt에 직접 싣지 마세요.
 
 ```text
 다음 작업을 실행하세요.
 
 - 작업: <eval prompt>
-- 입력 파일: <eval files if any, or "none">
-- 출력 저장 위치: <absolute path to .../with_skill/run-<RUN>/outputs/>
+- 입력 파일: <run-dir relative input paths if any, or "none">
+- 출력 저장 위치: outputs/
 - 저장해야 할 결과물: <사용자가 중요하게 보는 것 — 예: ".docx 파일", "최종 CSV">
-- 실행 요약 저장 위치: <absolute path to .../with_skill/run-<RUN>/transcript.md>
-- 선택적 provenance 저장 위치: <absolute path to .../with_skill/run-<RUN>/run_provenance.json>
+- 실행 요약 저장 위치: transcript.md
+- 선택적 provenance 저장 위치: run_provenance.json
 
 추가 규칙:
 - 산출물은 지정된 `outputs/` 아래에 저장하세요.
@@ -243,6 +243,7 @@ codex exec - \
   --sandbox workspace-write \
   --skip-git-repo-check \
   --json \
+  --ephemeral \
   < <absolute path to run-dir/run_prompt.md> \
   > <absolute path to run-dir/codex-events.jsonl>
 ```
@@ -444,7 +445,7 @@ python -m scripts.package_skill <path/to/skill-folder>
 
 **테스트 케이스 실행**: 각 테스트 케이스를 독립된 실행 단위로 취급한다. 최소 실행 단위는 `eval-N/<config>/run-N/`이며, run 하나는 `codex exec` 1회에 대응한다. 이 문서에서 안내하는 `codex exec` 호출은 모두 `--model gpt-5.4-mini`를 포함한다고 가정한다. 기본 운영은 bounded rolling queue다. `eval` 디렉터리 이름은 `eval-N` 형식을 유지하고, 설명적인 이름은 `eval_metadata.json`의 `eval_name`에 둔다. 기본은 각 config당 `run-1`만 실행하고, 사용자가 명시적으로 요청한 경우에만 최대 `run-3`까지 확장한다. 같은 eval의 `with_skill/run-K`와 baseline `run-K`는 같은 배치에서 시작해야 하며, 살아 있는 `codex exec` 총수는 언제나 6개 이하로 유지하세요. 그래서 기본 `run-1` benchmark에서는 eval 3개까지 동시에 굴릴 수 있고, 어떤 eval pair가 끝나면 다음 eval pair를 바로 백그라운드로 넣는 방식이 권장된다. 그 동안 assertion 작성과 이미 끝난 eval의 grading을 겹쳐 진행하면 된다.
 
-benchmark run은 각기 독립된 작업 디렉터리에서 실행하세요. `with_skill`은 benchmark 대상 스킬이 `.agents/skills/` 아래에서 보이도록 준비해야 하고, `without_skill`은 benchmark 대상 스킬의 이름/path/description을 prompt에 직접 실어 보내지 않는 편이 좋다.
+benchmark run은 각기 독립된 작업 디렉터리에서 실행하세요. `with_skill`은 benchmark 대상 스킬이 `.agents/skills/` 아래에서 보이도록 준비하되 `evals/` 디렉터리는 복사하지 마세요. `without_skill`은 benchmark 대상 스킬의 이름/path/description을 prompt에 직접 실어 보내지 않는 편이 좋다. prompt에는 가능하면 상대경로만 쓰고, benchmark용 `codex exec`에는 `--ephemeral`을 기본값으로 사용하세요.
 
 **결과 리뷰**: 브라우저를 열 수 없는 환경이거나 헤드리스 환경이라면, 브라우저 기반 리뷰어 대신 `generate_review.py --static <output_path>`로 단일 HTML 파일을 생성해라. 정적 리뷰어를 쓰지 않는다면 결과를 대화나 로그에 직접 정리해 보여 주고, 사용자가 확인해야 하는 파일(.docx, .xlsx 등)은 경로와 함께 안내한다.
 
