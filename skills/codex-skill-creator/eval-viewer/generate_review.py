@@ -46,6 +46,7 @@ MIME_OVERRIDES = {
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 }
+INPUT_PATH_PREFIXES = ("container/workspace/", "workspace/")
 
 
 def read_text_utf8(path: Path, *, errors: str = "strict") -> str:
@@ -73,14 +74,56 @@ def iter_metadata_candidates(run_dir: Path, root: Path) -> list[Path]:
     return candidates
 
 
-def collect_input_files(run_dir: Path, metadata_dir: Path, rel_paths: list[Any]) -> list[dict]:
+def normalize_rel_path(value: str) -> str:
+    return value.replace("\\", "/")
+
+
+def strip_input_prefix(rel_path: str) -> str:
+    normalized = normalize_rel_path(rel_path)
+    for prefix in INPUT_PATH_PREFIXES:
+        if normalized.startswith(prefix):
+            stripped = normalized[len(prefix):]
+            if stripped:
+                return stripped
+    return normalized
+
+
+def build_input_display_overrides(metadata: dict[str, Any]) -> dict[str, str]:
+    overrides: dict[str, str] = {}
+    rel_paths = metadata.get("files", [])
+    source_files = metadata.get("source_files", [])
+
+    if isinstance(rel_paths, list):
+        for rel_path in rel_paths:
+            if isinstance(rel_path, str):
+                normalized = normalize_rel_path(rel_path)
+                overrides[normalized] = strip_input_prefix(normalized)
+
+    if isinstance(rel_paths, list) and isinstance(source_files, list):
+        for rel_path, source_file in zip(rel_paths, source_files):
+            if not isinstance(rel_path, str) or not isinstance(source_file, dict):
+                continue
+            target = source_file.get("target")
+            if isinstance(target, str) and target.strip():
+                overrides[normalize_rel_path(rel_path)] = normalize_rel_path(target.strip())
+
+    return overrides
+
+
+def collect_input_files(
+    run_dir: Path,
+    metadata_dir: Path,
+    rel_paths: list[Any],
+    display_overrides: dict[str, str] | None = None,
+) -> list[dict]:
     collected: list[dict] = []
     seen_names: set[str] = set()
+    display_overrides = display_overrides or {}
 
     for rel_path in rel_paths:
         if not isinstance(rel_path, str):
             continue
-        normalized = rel_path.replace("\\", "/")
+        normalized = normalize_rel_path(rel_path)
         if normalized in seen_names:
             continue
         for file_candidate in [
@@ -89,7 +132,8 @@ def collect_input_files(run_dir: Path, metadata_dir: Path, rel_paths: list[Any])
         ]:
             if file_candidate.exists() and file_candidate.is_file():
                 seen_names.add(normalized)
-                collected.append(embed_file(file_candidate, display_name=normalized))
+                display_name = display_overrides.get(normalized, strip_input_prefix(normalized))
+                collected.append(embed_file(file_candidate, display_name=display_name))
                 break
 
     return collected
@@ -153,7 +197,12 @@ def build_run(root: Path, run_dir: Path) -> dict | None:
                 metadata = read_json_utf8(candidate)
                 prompt = metadata.get("prompt", "")
                 eval_id = metadata.get("eval_id")
-                input_files = collect_input_files(run_dir, candidate.parent, metadata.get("files", []))
+                input_files = collect_input_files(
+                    run_dir,
+                    candidate.parent,
+                    metadata.get("files", []),
+                    build_input_display_overrides(metadata),
+                )
             except (json.JSONDecodeError, OSError, UnicodeDecodeError):
                 pass
             if prompt:

@@ -19,6 +19,7 @@ import os
 import re
 import shutil
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -33,6 +34,17 @@ MAX_RUNS = 3
 EXCLUDED_DIRS = {"__pycache__", "node_modules"}
 EXCLUDED_FILES = {".DS_Store"}
 EXCLUDED_SUFFIXES = {".pyc"}
+CONTAINER_DIRNAME = "container"
+WORKSPACE_DIRNAME = "workspace"
+OUTPUTS_DIRNAME = "outputs"
+WORKSPACE_CONTRACT_FILENAME = "workspace_contract.json"
+EVALS_FILES_PREFIX = ("evals", "files")
+
+
+@dataclass(frozen=True)
+class WorkspaceEntry:
+    source: str
+    target: str
 
 
 def read_json_utf8(path: Path) -> dict:
@@ -77,6 +89,10 @@ def next_iteration_number(workspace_root: Path) -> int:
     return max(numbers, default=0) + 1
 
 
+def default_workspace_root(skill_name: str) -> Path:
+    return Path.home() / ".codex" / "isolated-runs" / "skill-bench" / skill_name
+
+
 def should_skip_copy(path: Path, skill_root: Path) -> bool:
     rel_path = path.relative_to(skill_root)
     if not rel_path.parts:
@@ -104,20 +120,77 @@ def copy_skill_bundle(source: Path, destination: Path) -> None:
         shutil.copy2(item, target_path)
 
 
-def stage_input_files(skill_path: Path, eval_dir: Path, files: list[str]) -> list[Path]:
+def normalize_relative_entry(value: str, *, label: str) -> str:
+    rel_path = Path(value)
+    if rel_path.is_absolute():
+        raise ValueError(f"{label} must be relative: {value}")
+    if any(part == ".." for part in rel_path.parts):
+        raise ValueError(f"{label} must not escape its root with '..': {value}")
+
+    normalized = rel_path.as_posix().strip()
+    if not normalized or normalized == ".":
+        raise ValueError(f"{label} must not be empty: {value}")
+    return normalized
+
+
+def default_workspace_target(source: str) -> str:
+    rel_path = Path(source)
+    if rel_path.parts[: len(EVALS_FILES_PREFIX)] == EVALS_FILES_PREFIX:
+        stripped = Path(*rel_path.parts[len(EVALS_FILES_PREFIX):])
+        if stripped.parts:
+            rel_path = stripped
+    return normalize_relative_entry(rel_path.as_posix(), label="workspace target")
+
+
+def normalize_workspace_entries(raw_entries: list[object], *, eval_id: int) -> list[WorkspaceEntry]:
+    targets_seen: set[str] = set()
+    normalized: list[WorkspaceEntry] = []
+
+    for index, raw_entry in enumerate(raw_entries):
+        if isinstance(raw_entry, str):
+            source = normalize_relative_entry(raw_entry, label="workspace source")
+            target = default_workspace_target(source)
+        elif isinstance(raw_entry, dict):
+            source = raw_entry.get("source")
+            target = raw_entry.get("target")
+            if not isinstance(source, str) or not source.strip():
+                raise ValueError(
+                    f"eval {eval_id} file entry #{index} is missing non-empty string 'source'"
+                )
+            if not isinstance(target, str) or not target.strip():
+                raise ValueError(
+                    f"eval {eval_id} file entry #{index} is missing non-empty string 'target'"
+                )
+            source = normalize_relative_entry(source, label="workspace source")
+            target = normalize_relative_entry(target, label="workspace target")
+        else:
+            raise ValueError(
+                f"eval {eval_id} has invalid file entry #{index}; expected string or object"
+            )
+
+        if target in targets_seen:
+            raise ValueError(f"eval {eval_id} has duplicate workspace target: {target}")
+        targets_seen.add(target)
+        normalized.append(WorkspaceEntry(source=source, target=target))
+
+    return normalized
+
+
+def stage_workspace_files(skill_path: Path, workspace_dir: Path, entries: list[WorkspaceEntry]) -> list[Path]:
     staged_paths: list[Path] = []
-    for file_entry in files:
-        rel_path = Path(file_entry)
-        if rel_path.is_absolute():
-            raise ValueError(f"Input files must be relative to the skill root: {file_entry}")
+    workspace_dir_resolved = workspace_dir.resolve()
 
-        source_path = (skill_path / rel_path).resolve()
+    for entry in entries:
+        source_path = (skill_path / entry.source).resolve()
         if not source_path.exists():
-            raise FileNotFoundError(f"Input file not found: {file_entry}")
+            raise FileNotFoundError(f"Workspace source not found: {entry.source}")
         if not source_path.is_file():
-            raise ValueError(f"Input path must be a file: {file_entry}")
+            raise ValueError(f"Workspace source must be a file: {entry.source}")
 
-        staged_path = eval_dir / "inputs" / rel_path
+        staged_path = (workspace_dir / entry.target).resolve()
+        if workspace_dir_resolved not in staged_path.parents and staged_path != workspace_dir_resolved:
+            raise ValueError(f"Workspace target escapes workspace root: {entry.target}")
+
         staged_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source_path, staged_path)
         staged_paths.append(staged_path)
@@ -137,35 +210,76 @@ def build_run_prompt(
     prompt: str,
     expected_output: str,
     staged_paths: list[Path],
-    run_dir: Path,
+    container_dir: Path,
 ) -> str:
     if staged_paths:
         input_block = "\n".join(
-            f"  - `{relative_from(staged_path, run_dir)}`" for staged_path in staged_paths
+            f"  - `{relative_from(staged_path, container_dir)}`" for staged_path in staged_paths
         )
     else:
-        input_block = '  - "none"'
+        input_block = f'  - `{WORKSPACE_DIRNAME}/` (empty scaffold)'
 
     expected_output_line = expected_output or "사용자 요청에 맞는 최종 산출물"
+    output_dir = f"../{OUTPUTS_DIRNAME}/"
+    transcript_path = f"../{OUTPUTS_DIRNAME}/transcript.md"
+    contract_path = WORKSPACE_CONTRACT_FILENAME
 
     return "\n".join(
         [
-            "다음 작업을 실행하세요.",
+            "## Benchmark Environment Contract",
+            "",
+            "당신은 benchmark container 안에서 작업 중입니다.",
+            "",
+            "현재 작업 디렉터리 기준:",
+            f"- `{WORKSPACE_DIRNAME}/`: 유일한 프로젝트 작업 공간",
+            "- `.agents/skills/`: 스킬 로딩 전용 경로",
+            f"- `{output_dir}`: 최종 결과물 저장 위치",
+            f"- `{transcript_path}`: 실행 요약 저장 위치",
+            f"- `{contract_path}`: 현재 run의 workspace 계약 요약",
+            "",
+            "작업 규칙:",
+            f"- 프로젝트 파일을 읽거나 수정할 때는 오직 `{WORKSPACE_DIRNAME}/` 아래만 사용하세요.",
+            f"- 사고 과정에서는 `{WORKSPACE_DIRNAME}/`를 사용자의 프로젝트 루트처럼 취급하세요.",
+            f"- 예를 들어 `package.json`을 다룬다고 생각되면, 실제 디스크 경로는 `{WORKSPACE_DIRNAME}/package.json`입니다.",
+            f"- `{WORKSPACE_DIRNAME}/` 밖을 조사하거나 수정하지 마세요.",
+            f"- 단, 최종 산출물은 `{output_dir}`에 저장하는 것은 허용됩니다.",
+            "- `.agents/skills/`는 읽기만 가능하며 수정하지 마세요.",
+            "- 쉘 작업이 거부되는데 파일 읽기나 쓰기가 필요하면 `js_repl`을 사용하세요.",
+            "- 경로를 요약하거나 설명할 때는 가능하면 프로젝트 루트 기준으로 설명하세요.",
+            "",
+            "## Task",
             "",
             f"- 작업: {prompt}",
             "- 입력 파일:",
             input_block,
-            "- 출력 저장 위치: `outputs/`",
+            f"- 출력 저장 위치: `{output_dir}`",
             f"- 기대 결과: {expected_output_line}",
-            "- 실행 요약 저장 위치: `transcript.md`",
-            "- 선택적 provenance 저장 위치: `run_provenance.json`",
+            f"- 실행 요약 저장 위치: `{transcript_path}`",
+            "- benchmark provenance 파일은 runner가 관리하므로 직접 작성하지 않아도 됩니다.",
             "",
-            "추가 규칙:",
-            "- 산출물은 지정된 `outputs/` 아래에 저장하세요.",
-            "- 실행 중 참고한 핵심 파일, 사용한 스크립트, 남은 불확실성을 `transcript.md`에 짧게 정리하세요.",
-            "- `run_provenance.json`을 쓴다면 `executor`, `configuration`, `baseline_type`, `skill_path_requested`, `prompt_path`, `command`를 기록하세요.",
+            "## Additional Notes",
+            f"- 산출물은 지정된 `{output_dir}` 아래에 저장하세요.",
+            f"- 실행 중 참고한 핵심 파일, 사용한 스크립트, 남은 불확실성을 `{transcript_path}`에 짧게 정리하세요.",
+            "- benchmark 전용 메타데이터 파일(`run_provenance.json`, `timing.json` 등)은 runner가 채우므로 수정하지 마세요.",
         ]
     )
+
+
+def build_workspace_contract() -> dict:
+    return {
+        "container_root": ".",
+        "project_root": WORKSPACE_DIRNAME,
+        "skill_mount": ".agents/skills",
+        "output_root": f"../{OUTPUTS_DIRNAME}",
+        "transcript_path": f"../{OUTPUTS_DIRNAME}/transcript.md",
+        "rules": [
+            f"Read and modify only {WORKSPACE_DIRNAME}/",
+            f"Treat {WORKSPACE_DIRNAME}/ as the user's project root for relative project paths",
+            f"Write final deliverables to ../{OUTPUTS_DIRNAME}/",
+            "Do not modify .agents/skills/",
+            "Use js_repl for file reads or writes when shell work is rejected",
+        ],
+    }
 
 
 def load_evals(skill_path: Path, skill_name: str) -> list[dict]:
@@ -200,13 +314,13 @@ def load_evals(skill_path: Path, skill_name: str) -> list[dict]:
         if not isinstance(prompt, str) or not prompt.strip():
             raise ValueError(f"eval entry #{index} is missing non-empty 'prompt'")
 
-        files = raw_eval.get("files", [])
+        raw_files = raw_eval.get("files", [])
         expectations = raw_eval.get("expectations", [])
         expected_output = raw_eval.get("expected_output", "")
         eval_name = raw_eval.get("eval_name") or raw_eval.get("name")
 
-        if not isinstance(files, list) or any(not isinstance(item, str) for item in files):
-            raise ValueError(f"eval {eval_id} has invalid 'files'; expected a string array")
+        if not isinstance(raw_files, list):
+            raise ValueError(f"eval {eval_id} has invalid 'files'; expected an array")
         if not isinstance(expectations, list) or any(not isinstance(item, str) for item in expectations):
             raise ValueError(f"eval {eval_id} has invalid 'expectations'; expected a string array")
         if expected_output and not isinstance(expected_output, str):
@@ -214,13 +328,15 @@ def load_evals(skill_path: Path, skill_name: str) -> list[dict]:
         if eval_name and not isinstance(eval_name, str):
             raise ValueError(f"eval {eval_id} has invalid 'eval_name'; expected a string")
 
+        workspace_entries = normalize_workspace_entries(raw_files, eval_id=eval_id)
+
         seen_ids.add(eval_id)
         normalized.append(
             {
                 "id": eval_id,
                 "prompt": prompt.strip(),
                 "expected_output": expected_output.strip(),
-                "files": files,
+                "workspace_entries": workspace_entries,
                 "expectations": expectations,
                 "eval_name": (eval_name or "").strip(),
             }
@@ -263,7 +379,7 @@ def prepare_benchmark_workspace(
         raise ValueError("Unable to determine skill name from SKILL.md")
 
     evals = load_evals(skill_path, skill_name)
-    workspace_root = (workspace_root or (skill_path.parent / f"{skill_name}-workspace")).resolve()
+    workspace_root = (workspace_root or default_workspace_root(skill_name)).resolve()
     workspace_root.mkdir(parents=True, exist_ok=True)
 
     iteration_number = iteration or next_iteration_number(workspace_root)
@@ -300,7 +416,10 @@ def prepare_benchmark_workspace(
         eval_dir = iteration_dir / f"eval-{eval_case['id']}"
         eval_dir.mkdir(parents=True, exist_ok=False)
 
-        staged_inputs = stage_input_files(skill_path, eval_dir, eval_case["files"])
+        workspace_targets = [
+            f"{CONTAINER_DIRNAME}/{WORKSPACE_DIRNAME}/{entry.target}"
+            for entry in eval_case["workspace_entries"]
+        ]
         eval_name = eval_case["eval_name"] or slugify(
             eval_case["expected_output"] or eval_case["prompt"],
             fallback=f"eval-{eval_case['id']}",
@@ -313,11 +432,13 @@ def prepare_benchmark_workspace(
                 "eval_name": eval_name,
                 "prompt": eval_case["prompt"],
                 "expected_output": eval_case["expected_output"],
-                "files": eval_case["files"],
-                "assertions": eval_case["expectations"],
-                "staged_inputs": [
-                    relative_posix_path(path, eval_dir) for path in staged_inputs
+                "files": workspace_targets,
+                "source_files": [
+                    {"source": entry.source, "target": entry.target}
+                    for entry in eval_case["workspace_entries"]
                 ],
+                "assertions": eval_case["expectations"],
+                "staged_inputs": workspace_targets,
             },
         )
 
@@ -327,25 +448,39 @@ def prepare_benchmark_workspace(
 
             for run_number in range(1, runs + 1):
                 run_dir = config_dir / f"run-{run_number}"
-                (run_dir / "outputs").mkdir(parents=True, exist_ok=True)
+                outputs_dir = run_dir / OUTPUTS_DIRNAME
+                container_dir = run_dir / CONTAINER_DIRNAME
+                workspace_dir = container_dir / WORKSPACE_DIRNAME
+                outputs_dir.mkdir(parents=True, exist_ok=True)
+                workspace_dir.mkdir(parents=True, exist_ok=True)
+
+                staged_workspace_paths = stage_workspace_files(
+                    skill_path=skill_path,
+                    workspace_dir=workspace_dir,
+                    entries=eval_case["workspace_entries"],
+                )
+                write_json_utf8(
+                    container_dir / WORKSPACE_CONTRACT_FILENAME,
+                    build_workspace_contract(),
+                )
 
                 run_prompt = build_run_prompt(
                     prompt=eval_case["prompt"],
                     expected_output=eval_case["expected_output"],
-                    staged_paths=staged_inputs,
-                    run_dir=run_dir,
+                    staged_paths=staged_workspace_paths,
+                    container_dir=container_dir,
                 )
                 write_text_utf8(run_dir / "run_prompt.md", run_prompt)
 
                 if config_name == "with_skill":
                     copy_skill_bundle(
                         skill_path,
-                        run_dir / ".agents" / "skills" / skill_path.name,
+                        container_dir / ".agents" / "skills" / skill_path.name,
                     )
                 elif config_name == "old_skill" and baseline_source is not None:
                     copy_skill_bundle(
                         baseline_source,
-                        run_dir / ".agents" / "skills" / baseline_source.name,
+                        container_dir / ".agents" / "skills" / baseline_source.name,
                     )
 
     return iteration_dir
@@ -363,7 +498,7 @@ def main() -> None:
     parser.add_argument(
         "--workspace-root",
         type=Path,
-        help="Workspace root directory (default: sibling <skill-name>-workspace)",
+        help="Workspace root directory (default: ~/.codex/isolated-runs/skill-bench/<skill-name>)",
     )
     parser.add_argument(
         "--iteration",

@@ -149,7 +149,12 @@ LLM은 필요한 참조 파일만 읽는다.
       "id": 1,
       "prompt": "사용자 작업 프롬프트",
       "expected_output": "기대 결과 설명",
-      "files": []
+      "files": [
+        {
+          "source": "evals/files/example/package.json",
+          "target": "package.json"
+        }
+      ]
     }
   ]
 }
@@ -161,7 +166,7 @@ LLM은 필요한 참조 파일만 읽는다.
 
 이 섹션은 하나의 연속된 흐름이다. 중간에서 멈추지 마라. `/skill-test`나 다른 테스트용 스킬은 사용하면 안된다.
 
-결과는 스킬 디렉터리와 형제 관계인 `<skill-name>-workspace/`에 저장한다. 워크스페이스 안에서는 반복 차수별로(`iteration-1/`, `iteration-2/` 등) 정리하고, 각 테스트 케이스마다 디렉터리를 따로 둔다(`eval-1/`, `eval-2/` 등). `eval` 디렉터리 이름은 계속 `eval-N` 형식을 유지하고, 사람이 읽는 설명적인 이름은 `eval_metadata.json`의 `eval_name`에 넣으세요.
+결과는 가능한 한 benchmark 전용 clean root(예: `~/.codex/isolated-runs/skill-bench/<skill-name>/`) 아래에 저장한다. 워크스페이스 안에서는 반복 차수별로(`iteration-1/`, `iteration-2/` 등) 정리하고, 각 테스트 케이스마다 디렉터리를 따로 둔다(`eval-1/`, `eval-2/` 등). `eval` 디렉터리 이름은 계속 `eval-N` 형식을 유지하고, 사람이 읽는 설명적인 이름은 `eval_metadata.json`의 `eval_name`에 넣으세요. 특별한 이유가 있을 때만 `--workspace-root`로 위치를 바꾸세요.
 
 벤치마크용 디렉터리 scaffold, `eval_metadata.json`, `run_prompt.md`, 입력 파일 staging, `with_skill`용 `.agents/skills/` 복사본 준비는 수동으로 하지 말고 `scripts/setup_benchmark.py`를 기본 진입점으로 사용하세요. benchmark setup의 source of truth는 이 스크립트다.
 
@@ -201,6 +206,7 @@ iteration-N/
       run-1/
         run_prompt.md
         outputs/
+        transcript.md
         codex-events.jsonl
         codex-stderr.log
         run_provenance.json
@@ -210,10 +216,18 @@ iteration-N/
         grader-stderr.log
         grading_provenance.json
         grading.json
+        container/
+          workspace/
+            ...
+          .agents/
+            skills/
+              <skill-copy>
+          workspace_contract.json
     without_skill/
       run-1/
         run_prompt.md
         outputs/
+        transcript.md
         codex-events.jsonl
         codex-stderr.log
         run_provenance.json
@@ -223,6 +237,10 @@ iteration-N/
         grader-stderr.log
         grading_provenance.json
         grading.json
+        container/
+          workspace/
+            ...
+          workspace_contract.json
 ```
 
 config 이름은 기본적으로 `with_skill`과 `without_skill`를 사용한다. 기존 스킬을 개선하는 경우 baseline config는 `old_skill`을 사용하세요.
@@ -237,29 +255,33 @@ config 이름은 기본적으로 `with_skill`과 `without_skill`를 사용한다
 
 **격리 원칙**
 
-- 각 run은 자기 전용 작업 디렉터리에서 실행하세요. 보통 `<workspace>/iteration-<N>/eval-<ID>/<config>/run-<RUN>/` 자체를 작업 디렉터리로 써도 된다.
+- 각 run은 자기 전용 작업 디렉터리를 가지되, 실제 `codex exec`의 cwd는 보통 `<run>/container/`로 잡는 편이 좋다. 프로젝트 파일은 그 아래 `workspace/`에 두고, 모델에게는 `workspace/`를 사용자의 프로젝트 루트처럼 취급하라고 알려 주세요.
 - 각 run 디렉터리에는 실행 전 `run_prompt.md`를 저장하세요. 이 파일이 그 run의 정확한 입력 증거다. 기본적으로는 setup 스크립트가 이 파일을 생성한다.
-- `with_skill` 실행에는 benchmark 대상 스킬이 현재 run의 작업 디렉터리 안 `.agents/skills/` 아래에서 보이도록 준비하세요. 가장 단순한 방법은 benchmark 대상 스킬 디렉터리를 복사해 두는 것이다. 다만 benchmark fixture 누수를 막기 위해 `evals/` 디렉터리는 복사하지 마세요.
-- baseline(`without_skill`)에는 benchmark 대상 스킬을 `.agents/skills/`에 두지 마세요. 프롬프트에도 benchmark 대상 스킬의 이름, description, path, 참조 파일 경로를 직접 넣지 않는 편이 좋다.
-- 기존 스킬 개선의 `old_skill` baseline은 예외다. 이 경우에는 **스냅샷된 이전 스킬 path만** `.agents/skills/` 아래에 두고, 현재 편집 중인 스킬 path는 넘기지 않는다. 이 스냅샷도 동일하게 `evals/` 디렉터리는 제외하세요.
+- `with_skill` 실행에는 benchmark 대상 스킬이 `container/.agents/skills/` 아래에서 보이도록 준비하세요. 가장 단순한 방법은 benchmark 대상 스킬 디렉터리를 복사해 두는 것이다. 다만 benchmark fixture 누수를 막기 위해 `evals/` 디렉터리는 복사하지 마세요.
+- baseline(`without_skill`)에는 benchmark 대상 스킬을 `container/.agents/skills/`에 두지 마세요. 프롬프트에도 benchmark 대상 스킬의 이름, description, path, 참조 파일 경로를 직접 넣지 않는 편이 좋다.
+- 기존 스킬 개선의 `old_skill` baseline은 예외다. 이 경우에는 **스냅샷된 이전 스킬 path만** `container/.agents/skills/` 아래에 두고, 현재 편집 중인 스킬 path는 넘기지 않는다. 이 스냅샷도 동일하게 `evals/` 디렉터리는 제외하세요.
+- run prompt에는 workspace 계약을 분명히 넣으세요. 즉 `workspace/`를 프로젝트 루트처럼 취급하고, 읽기/수정은 그 아래만 하게 하며, 최종 결과물과 transcript는 각각 `../outputs/`, `../outputs/transcript.md`로 빼도록 지시하세요.
 
 setup 스크립트가 만든 각 run 디렉터리에는 최소한 다음이 들어 있어야 한다.
 
 - `run_prompt.md` — `codex exec`에 그대로 넣을 프롬프트
 - `outputs/` — 최종 결과물을 저장할 디렉터리
+- `transcript.md` 또는 `outputs/transcript.md` — 실행 요약
+- `container/workspace/` — 실제 프로젝트 파일이 staged 되는 가상 작업 공간
+- `container/workspace_contract.json` — 현재 run의 workspace/output 계약
 - 선택 사항: `run_provenance.json` — 실행 메타데이터 기록 파일
 - grading 후에는 `grading_prompt.md`, `grader-events.jsonl`, `grader-stderr.log`, `grading_provenance.json`, `grading.json`이 추가될 수 있다
 
-`run_prompt.md`는 가능하면 현재 run 디렉터리 기준 상대경로를 쓰고, 불필요한 절대경로나 스킬 경로는 prompt에 직접 싣지 마세요. 프롬프트 내용이 setup 스크립트와 다르더라도, 이 계약은 유지되어야 한다.
+`run_prompt.md`는 가능하면 현재 `container/` 기준 상대경로를 쓰고, 불필요한 절대경로나 스킬 경로는 prompt에 직접 싣지 마세요. 프롬프트 안에서는 `workspace/`를 사용자의 프로젝트 루트처럼 취급하게 하고, 실제 디스크 경로만 `workspace/...`로 노출하는 편이 좋다. 프롬프트 내용이 setup 스크립트와 다르더라도, 이 계약은 유지되어야 한다.
 
-이 스킬에서 benchmark나 eval 목적으로 실행하는 `codex exec` 호출은 모델을 항상 `gpt-5.4-mini`로 고정하세요. 기본 benchmark runner와 grading runner는 내부적으로 `--json`, `--ephemeral`, `--skip-git-repo-check`, `workspace-write` sandbox를 사용해 각 run 디렉터리에서 `codex exec`를 호출한다. executor 쪽 실행 로그는 `codex-events.jsonl`, grader 쪽 실행 로그는 `grader-events.jsonl`에 저장한다. 이 파일들은 timing, usage, 실패 원인, 격리 상태를 사후 점검할 때 도움이 된다.
+이 스킬에서 benchmark나 eval 목적으로 실행하는 `codex exec` 호출은 모델을 항상 `gpt-5.4-mini`로 고정하세요. 기본 benchmark runner와 grading runner는 내부적으로 `--json`, `--ephemeral`, `--skip-git-repo-check`, `workspace-write` sandbox를 사용해 executor는 `container/`를 cwd로 실행하고, 결과물용 `outputs/`를 추가 writable path로 넘기는 편이 좋다. `js_repl`도 명시적으로 enable 하되, 프롬프트에서는 특히 쉘 작업이 거부되는데 파일 읽기나 쓰기가 필요할 때 `js_repl`을 사용하라고 알려 주는 편이 좋다. executor 쪽 실행 로그는 `codex-events.jsonl`, grader 쪽 실행 로그는 `grader-events.jsonl`에 저장한다. 이 파일들은 timing, usage, 실패 원인, 격리 상태를 사후 점검할 때 도움이 된다.
 
 **Baseline 실행**(프롬프트의 작업 내용은 with-skill run과 동일하지만, skill 구성은 상황에 따라 달라집니다):
 
 - **새 스킬을 만드는 경우**: baseline은 `without_skill`이다. 같은 프롬프트를 사용하고, benchmark 대상 스킬을 `.agents/skills/`에 두지 않은 상태에서 실행하세요. benchmark 대상 스킬의 이름/description/path를 prompt에 직접 넣지 마세요.
 - **기존 스킬을 개선하는 경우**: baseline은 `old_skill`이다. 편집 전에 이전 스킬 버전을 스냅샷으로 저장하고, baseline run에는 그 스냅샷만 `.agents/skills/` 아래에 두세요.
 
-각 테스트 케이스의 `eval_metadata.json`은 setup 스크립트가 생성한다. 이 파일에는 적어도 `eval_id`, `eval_name`, `prompt`, `files`, `assertions`가 들어 있어야 하며, `files`는 `evals/evals.json`의 같은 항목과 동일해야 한다. 이 iteration에서 새 프롬프트를 추가하거나 수정했다면 setup을 다시 실행해 새 eval 디렉터리를 생성하거나 갱신하세요. 이전 iteration의 파일이 자동으로 이어진다고 가정하지 마세요.
+각 테스트 케이스의 `eval_metadata.json`은 setup 스크립트가 생성한다. 이 파일에는 적어도 `eval_id`, `eval_name`, `prompt`, `files`, `assertions`가 들어 있어야 한다. 여기서 `files`는 실행 시점 기준의 staged path(`container/workspace/...`)를 담는 편이 좋고, 원래 fixture source/target 매핑은 별도의 `source_files` 같은 필드에 남겨 두는 것이 낫다. 이 iteration에서 새 프롬프트를 추가하거나 수정했다면 setup을 다시 실행해 새 eval 디렉터리를 생성하거나 갱신하세요. 이전 iteration의 파일이 자동으로 이어진다고 가정하지 마세요.
 
 ```json
 {
@@ -454,7 +476,7 @@ python -m scripts.package_skill <path/to/skill-folder>
 
 **테스트 케이스 실행**: 먼저 `python -m scripts.setup_benchmark <path/to/skill-folder>`로 iteration scaffold를 생성하고, 그 다음 `python -m scripts.run_benchmark <workspace>/iteration-N`로 실행하세요. 각 테스트 케이스는 독립된 실행 단위이며 최소 실행 단위는 `eval-N/<config>/run-N/`이다. run 하나는 executor `codex exec` 1회에 대응한다. 기본은 각 config당 `run-1`만 실행하고, 사용자가 명시적으로 요청한 경우에만 최대 `run-3`까지 확장한다. 기본 benchmark runner는 bounded rolling queue를 사용해 같은 eval의 비교군 pair를 함께 시작하고, 살아 있는 `codex exec` 총수를 6개 이하로 유지한다.
 
-benchmark run은 setup 스크립트가 만든 각기 독립된 작업 디렉터리에서 runner가 실행한다. `with_skill`은 benchmark 대상 스킬이 `.agents/skills/` 아래에서 보이도록 준비하되 `evals/` 디렉터리는 복사하지 마세요. `without_skill`은 benchmark 대상 스킬의 이름/path/description을 prompt에 직접 실어 보내지 않는 편이 좋다. prompt에는 가능하면 상대경로만 쓰고, benchmark용 `codex exec`에는 `--ephemeral`을 기본값으로 사용하세요. 이어서 돌릴 때는 `--resume`을 사용하세요. 실행이 끝난 run들을 채점하려면 이어서 `python -m scripts.run_grading <workspace>/iteration-N --resume`를 실행하세요. grading runner는 run마다 별도의 grader `codex exec`를 호출해 `grading.json`을 저장한다.
+benchmark run은 setup 스크립트가 만든 각기 독립된 작업 디렉터리에서 runner가 실행한다. `with_skill`은 benchmark 대상 스킬이 `container/.agents/skills/` 아래에서 보이도록 준비하되 `evals/` 디렉터리는 복사하지 마세요. `without_skill`은 benchmark 대상 스킬의 이름/path/description을 prompt에 직접 실어 보내지 않는 편이 좋다. prompt에는 가능하면 `container/` 기준 상대경로만 쓰고, 그 안에서는 `workspace/`를 프로젝트 루트처럼 취급하게 하세요. benchmark용 `codex exec`에는 `--ephemeral`을 기본값으로 사용하세요. 이어서 돌릴 때는 `--resume`을 사용하세요. 실행이 끝난 run들을 채점하려면 이어서 `python -m scripts.run_grading <workspace>/iteration-N --resume`를 실행하세요. grading runner는 run마다 별도의 grader `codex exec`를 호출해 `grading.json`을 저장한다.
 
 **결과 리뷰**: 브라우저를 열 수 없는 환경이거나 헤드리스 환경이라면, 브라우저 기반 리뷰어 대신 `generate_review.py --static <output_path>`로 단일 HTML 파일을 생성해라. 정적 리뷰어를 쓰지 않는다면 결과를 대화나 로그에 직접 정리해 보여 주고, 사용자가 확인해야 하는 파일(.docx, .xlsx 등)은 경로와 함께 안내한다.
 

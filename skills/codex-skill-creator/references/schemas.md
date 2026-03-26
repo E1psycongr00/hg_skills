@@ -43,7 +43,12 @@ description trigger eval의 입력 파일입니다. 각 skill 디렉터리의 `e
       "id": 1,
       "prompt": "사용자 예시 프롬프트",
       "expected_output": "기대 결과 설명",
-      "files": ["evals/files/sample1.pdf"],
+      "files": [
+        {
+          "source": "evals/files/sample1.pdf",
+          "target": "docs/sample1.pdf"
+        }
+      ],
       "expectations": [
         "출력에 X가 포함되어야 한다",
         "스킬이 스크립트 Y를 사용해야 한다"
@@ -59,7 +64,11 @@ description trigger eval의 입력 파일입니다. 각 skill 디렉터리의 `e
 - `evals[].id`: 고유한 정수 식별자
 - `evals[].prompt`: 실행할 작업
 - `evals[].expected_output`: 성공 조건을 사람이 읽기 쉽게 설명한 문장
-- `evals[].files`: 입력 파일 경로 목록(선택 사항, 스킬 루트 기준 상대 경로)
+- `evals[].files`: 입력 fixture 목록(선택 사항)
+- 문자열 항목은 스킬 루트 기준 상대 경로 source로 해석됨
+- 객체 항목은 `{ "source": "...", "target": "..." }` 형태를 사용
+- `source`: 스킬 루트 기준 fixture 경로
+- `target`: benchmark container의 `workspace/` 기준 상대 경로
 - `evals[].expectations`: 검증 가능한 기대 조건 목록
 
 ---

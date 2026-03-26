@@ -41,6 +41,9 @@ DEFAULT_MODEL = "gpt-5.4-mini"
 DEFAULT_SANDBOX = "workspace-write"
 DEFAULT_MAX_CONCURRENCY = 6
 DEFAULT_POLL_INTERVAL = 0.5
+CONTAINER_DIRNAME = "container"
+OUTPUTS_DIRNAME = "outputs"
+DEFAULT_ENABLED_FEATURES = ("js_repl",)
 CONFIG_PRIORITY = {
     "with_skill": 0,
     "without_skill": 1,
@@ -104,8 +107,12 @@ def resolve_codex_bin(command: str) -> str:
 
 
 def discover_skill_path(run_dir: Path) -> str | None:
-    skill_root = run_dir / ".agents" / "skills"
-    if not skill_root.exists():
+    skill_roots = (
+        run_dir / CONTAINER_DIRNAME / ".agents" / "skills",
+        run_dir / ".agents" / "skills",
+    )
+    skill_root = next((candidate for candidate in skill_roots if candidate.exists()), None)
+    if skill_root is None:
         return None
 
     children = sorted(child for child in skill_root.iterdir() if child.is_dir())
@@ -180,6 +187,14 @@ class RunSpec:
         return f"eval-{self.eval_id}/{self.config}/run-{self.run_number}"
 
     @property
+    def container_dir(self) -> Path:
+        return self.run_dir / CONTAINER_DIRNAME
+
+    @property
+    def outputs_dir(self) -> Path:
+        return self.run_dir / OUTPUTS_DIRNAME
+
+    @property
     def events_path(self) -> Path:
         return self.run_dir / "codex-events.jsonl"
 
@@ -235,22 +250,27 @@ class CompletedRun:
 
 def build_codex_command(
     codex_bin: str,
-    run_dir: Path,
+    container_dir: Path,
+    outputs_dir: Path,
     model: str,
     reasoning_effort: str | None,
     sandbox: str,
 ) -> tuple[list[str], str | None]:
     command = [codex_bin, "exec", "-"]
     resolved_reasoning_effort = apply_codex_model_settings(command, model, reasoning_effort)
+    for feature in DEFAULT_ENABLED_FEATURES:
+        command.extend(["--enable", feature])
     command.extend(
         [
             "--cd",
-            str(run_dir),
+            str(container_dir),
             "--sandbox",
             sandbox,
             "--skip-git-repo-check",
             "--json",
             "--ephemeral",
+            "--add-dir",
+            str(outputs_dir),
         ]
     )
     return command, resolved_reasoning_effort
@@ -400,7 +420,8 @@ def launch_run(
 ) -> ActiveRun:
     command, resolved_reasoning_effort = build_codex_command(
         codex_bin=codex_bin,
-        run_dir=spec.run_dir,
+        container_dir=spec.container_dir,
+        outputs_dir=spec.outputs_dir,
         model=model,
         reasoning_effort=reasoning_effort,
         sandbox=sandbox,
