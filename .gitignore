@@ -1,2 +1,4 @@
 .codex/
 *workspace/
+__pycache__/
+*.pyc
