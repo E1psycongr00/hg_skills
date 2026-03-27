@@ -11,6 +11,35 @@ from pathlib import Path
 
 
 UTF8 = "utf-8"
+BODY_TRIGGER_PATTERNS = (
+    re.compile(
+        r"(?im)^#{1,6}\s*(?:"
+        r"언제\s*(?:사용|써야)|"
+        r"사용\s*범위|"
+        r"트리거(?:\s*조건|\s*기준)?|"
+        r"언제\s*트리거(?:되고|되는지)?|"
+        r"사용하지\s*말아야\s*할\s*때|"
+        r"when\s+to\s+use|"
+        r"when\s+not\s+to\s+use|"
+        r"should\s+trigger|"
+        r"should\s+not\s+trigger|"
+        r"do\s+not\s+use(?:\s+this\s+skill)?"
+        r")\b"
+    ),
+    re.compile(r"(?im)^(?:[-*]\s*)?Use\s+this\s+skill\s+when\b"),
+    re.compile(r"(?im)^(?:[-*]\s*)?Do\s+not\s+use\s+this\s+skill\s+when\b"),
+    re.compile(r"(?im)^(?:[-*]\s*)?이\s*스킬(?:은|을)\s+.*(?:때|경우).*(?:사용(?:하세요|합니다|한다)|써야\s*한다)\b"),
+    re.compile(r"(?im)^(?:[-*]\s*)?이\s*스킬(?:은|을)\s+.*(?:때|경우).*(?:사용하지\s*마세요|사용하면\s*안\s*된다|쓰지\s*마세요)\b"),
+)
+
+
+def find_trigger_leakage(body_text):
+    """Return the first trigger-style body snippet that should live in description."""
+    for pattern in BODY_TRIGGER_PATTERNS:
+        match = pattern.search(body_text)
+        if match:
+            return " ".join(match.group(0).split())
+    return None
 
 
 def validate_skill(skill_path):
@@ -28,11 +57,11 @@ def validate_skill(skill_path):
         return False, "No YAML frontmatter found"
 
     # Extract frontmatter
-    match = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
-    if not match:
+    frontmatter_match = re.match(r'^---\n(.*?)\n---', content, re.DOTALL)
+    if not frontmatter_match:
         return False, "Invalid frontmatter format"
 
-    frontmatter_text = match.group(1)
+    frontmatter_text = frontmatter_match.group(1)
 
     # Parse YAML frontmatter
     try:
@@ -94,6 +123,15 @@ def validate_skill(skill_path):
             return False, f"Compatibility must be a string, got {type(compatibility).__name__}"
         if len(compatibility) > 500:
             return False, f"Compatibility is too long ({len(compatibility)} characters). Maximum is 500 characters."
+
+    body = content[frontmatter_match.end():].strip()
+    body_trigger_leak = find_trigger_leakage(body)
+    if body_trigger_leak:
+        return False, (
+            "SKILL.md body appears to contain trigger guidance "
+            f"('{body_trigger_leak}'). Move when-to-use / when-not-to-use rules "
+            "into the frontmatter description and keep the body focused on workflow."
+        )
 
     return True, "Skill is valid!"
 
