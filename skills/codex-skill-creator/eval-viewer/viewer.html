@@ -278,6 +278,38 @@
     .grades-toggle .arrow.open {
       transform: rotate(90deg);
     }
+    .eval-feedback-summary {
+      color: var(--text);
+      font-size: 0.9375rem;
+      line-height: 1.6;
+      margin-bottom: 0.875rem;
+    }
+    .eval-feedback-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+    .eval-feedback-item {
+      border-top: 1px solid var(--border);
+      padding: 0.75rem 0;
+    }
+    .eval-feedback-item:first-child {
+      border-top: none;
+      padding-top: 0;
+    }
+    .eval-feedback-assertion {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-muted);
+      margin-bottom: 0.35rem;
+    }
+    .eval-feedback-reason {
+      font-size: 0.875rem;
+      line-height: 1.6;
+      color: var(--text);
+    }
     .grades-content {
       display: none;
       margin-top: 0.75rem;
@@ -605,6 +637,17 @@
         <div class="grades-content" id="grades-content"></div>
       </div>
 
+      <!-- AI eval feedback (collapsible) -->
+      <div class="section" id="eval-feedback-section" style="display:none;">
+        <div class="section-header">
+          <div class="grades-toggle" onclick="toggleEvalFeedback()">
+            <span class="arrow" id="eval-feedback-arrow">&#9654;</span>
+            AI Eval Feedback
+          </div>
+        </div>
+        <div class="grades-content" id="eval-feedback-content"></div>
+      </div>
+
       <!-- Feedback -->
       <div class="section">
         <div class="section-header">Your Feedback</div>
@@ -754,6 +797,9 @@
 
       // Grades
       renderGrades(run);
+
+      // AI eval feedback
+      renderEvalFeedback(run);
 
       // Previous feedback
       const prevFb = (EMBEDDED_DATA.previous_feedback || {})[run.id];
@@ -946,6 +992,51 @@
     function toggleGrades() {
       const content = document.getElementById("grades-content");
       const arrow = document.getElementById("grades-arrow");
+      content.classList.toggle("open");
+      arrow.classList.toggle("open");
+    }
+
+    function renderEvalFeedback(run) {
+      const section = document.getElementById("eval-feedback-section");
+      const content = document.getElementById("eval-feedback-content");
+      const grading = run.grading || {};
+      const evalFeedback = grading.eval_feedback;
+
+      if (!evalFeedback) {
+        section.style.display = "none";
+        return;
+      }
+
+      section.style.display = "block";
+      content.classList.remove("open");
+      document.getElementById("eval-feedback-arrow").classList.remove("open");
+
+      const overall = evalFeedback.overall || "No suggestions, evals look solid";
+      const suggestions = Array.isArray(evalFeedback.suggestions) ? evalFeedback.suggestions : [];
+
+      let html = '<div style="padding: 1rem;">';
+      html += '<div class="eval-feedback-summary">' + escapeHtml(overall) + '</div>';
+
+      if (suggestions.length > 0) {
+        html += '<ul class="eval-feedback-list">';
+        for (const suggestion of suggestions) {
+          html += '<li class="eval-feedback-item">';
+          if (suggestion.assertion) {
+            html += '<div class="eval-feedback-assertion">Assertion: ' + escapeHtml(suggestion.assertion) + '</div>';
+          }
+          html += '<div class="eval-feedback-reason">' + escapeHtml(suggestion.reason || "") + '</div>';
+          html += '</li>';
+        }
+        html += '</ul>';
+      }
+
+      html += '</div>';
+      content.innerHTML = html;
+    }
+
+    function toggleEvalFeedback() {
+      const content = document.getElementById("eval-feedback-content");
+      const arrow = document.getElementById("eval-feedback-arrow");
       content.classList.toggle("open");
       arrow.classList.toggle("open");
     }
