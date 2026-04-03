@@ -1,0 +1,41 @@
+{
+  "skill_name": "codex-subagent-creator",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "우리 팀은 PR 리뷰를 할 때마다 코드 흐름 파악, 실제 버그/리스크 리뷰, 프레임워크 문서 확인을 따로 맡기고 싶어. Codex custom subagent 3개를 설계하고 `.codex/agents/*.toml` 형태로 바로 쓸 수 있게 작성해줘.",
+      "expected_output": "PR 리뷰용 에이전트 세트를 설계하고 저장 가능한 TOML을 만든다.",
+      "expectations": [
+        "- 탐색, 리뷰, 문서 조사 역할이 분리되어야 한다.",
+        "- 각 `.codex/agents/<basename>.toml` 파일의 `<basename>`과 TOML 내부 `name`이 완전히 같아야 한다.",
+        "- 각 TOML에 name, description, developer_instructions가 들어가야 한다.",
+        "- 읽기 전용 역할에는 read-only를 우선 사용해야 한다.",
+        "- 모델과 reasoning 선택 이유가 역할과 맞아야 한다."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "Next.js 앱에서 설정 모달 저장 실패를 자주 디버깅한다. 브라우저 재현, 코드 경로 추적, 최소 수정 담당으로 나눈 custom agent 구성을 설계해주고 TOML까지 써줘.",
+      "expected_output": "프론트엔드 통합 디버깅용 에이전트 세트와 TOML을 작성한다.",
+      "expectations": [
+        "- 브라우저 재현과 코드 수정 역할을 같은 에이전트에 몰아넣지 않아야 한다.",
+        "- 각 `.codex/agents/<basename>.toml` 파일의 `<basename>`과 TOML 내부 `name`이 완전히 같아야 한다.",
+        "- 수정 담당만 workspace-write를 사용해야 한다.",
+        "- browser tooling이나 MCP가 핵심이면 관련 설정 또는 실행 전제와 fallback이 TOML 안에서 드러나야 한다.",
+        "- developer_instructions에 역할 경계와 handoff가 보여야 한다."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "보안 취약점 triage만 전담하는 읽기 전용 Codex agent 하나가 필요해. 반복 사용 가능한 custom agent TOML을 설계해줘.",
+      "expected_output": "단일 읽기 전용 보안 triage agent TOML과 사용 예시를 작성한다.",
+      "expectations": [
+        "- 에이전트가 좁고 선명한 역할을 가져야 한다.",
+        "- `.codex/agents/<basename>.toml` 파일의 `<basename>`과 TOML 내부 `name`이 완전히 같아야 한다.",
+        "- sandbox_mode가 read-only여야 한다.",
+        "- developer_instructions가 증거 중심 검토와 금지 범위를 포함해야 한다.",
+        "- 만능 에이전트처럼 구현이나 배포 책임을 섞지 않아야 한다."
+      ]
+    }
+  ]
+}
