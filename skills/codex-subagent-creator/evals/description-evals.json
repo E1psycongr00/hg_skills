@@ -1,0 +1,55 @@
+{
+  "skill_name": "codex-subagent-creator",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Codex용 custom subagent를 하나 설계하고 `.codex/agents/reviewer.toml`까지 써줘.",
+      "should_trigger": true
+    },
+    {
+      "id": 2,
+      "prompt": "반복해서 쓸 수 있는 Codex agent 세트를 만들고 싶어. explorer랑 fixer 역할을 나눠서 TOML 파일까지 만들어줘.",
+      "should_trigger": true
+    },
+    {
+      "id": 3,
+      "prompt": "우리 프로젝트 로컬 `.codex/agents` 폴더에 넣을 서브 에이전트 스펙을 설계해줘.",
+      "should_trigger": true
+    },
+    {
+      "id": 4,
+      "prompt": "Codex에서 병렬로 돌릴 reviewer agent, docs agent, browser agent를 재사용 가능하게 정의하고 싶어.",
+      "should_trigger": true
+    },
+    {
+      "id": 5,
+      "prompt": "AGENTS.md를 새로 써줘. 우리 저장소 규칙을 정리하고 싶어.",
+      "should_trigger": false
+    },
+    {
+      "id": 6,
+      "prompt": "이번 한 번만 쓸 spawn_agent 메시지 문구만 짧게 써줘.",
+      "should_trigger": false
+    },
+    {
+      "id": 7,
+      "prompt": "일반적인 시스템 프롬프트 템플릿을 만들어줘. Codex subagent 파일은 필요 없어.",
+      "should_trigger": false
+    },
+    {
+      "id": 8,
+      "prompt": "팀 역할 정의 문서를 써줘. 개발자, 디자이너, QA 책임만 정리하면 돼.",
+      "should_trigger": false
+    },
+    {
+      "id": 9,
+      "prompt": "`.codex/config.toml`의 `[agents]` 설정만 정리해줘. max_threads랑 max_depth 추천도 같이.",
+      "should_trigger": false
+    },
+    {
+      "id": 10,
+      "prompt": "custom agent는 이미 있으니 부모 프롬프트 템플릿만 만들어줘.",
+      "should_trigger": false
+    }
+  ]
+}

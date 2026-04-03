@@ -1,0 +1,26 @@
+{
+  "skill_name": "codex-subagent-creator",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Codex reviewer agent 하나를 설계해줘. 최종 결과는 바로 저장 가능한 TOML 위주로 정리해줘.",
+      "expected_output": "설계 요약과 TOML 파일 본문이 구조적으로 정리된 응답을 만든다.",
+      "expectations": [
+        "- 설계 요약이 먼저 있어야 한다.",
+        "- 파일 경로가 명시되어야 한다.",
+        "- 각 `.codex/agents/<basename>.toml` 파일의 `<basename>`과 TOML 내부 `name`이 완전히 같아야 한다.",
+        "- TOML은 fenced code block으로 제공되어야 한다."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "PR review용 에이전트 3개를 설계하는데, 내가 바로 `.codex/agents`에 저장할 수 있게 정리해줘.",
+      "expected_output": "여러 TOML 파일을 바로 저장 가능한 구조로 정리한 결과를 만든다.",
+      "expectations": [
+        "- 에이전트별 파일 단위로 구분되어야 한다.",
+        "- 각 `.codex/agents/<basename>.toml` 파일의 `<basename>`과 TOML 내부 `name`이 완전히 같아야 한다.",
+        "- 추가 결정 포인트나 가정이 마지막에 분리되어야 한다."
+      ]
+    }
+  ]
+}
